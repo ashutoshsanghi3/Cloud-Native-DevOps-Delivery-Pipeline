@@ -72,7 +72,7 @@ This setup ensures a secure, resilient, observable, and automated multi-region a
 
 The deployed application consists of:
 
-- **Frontend**: React single-page application (SPA) hosted on EKS
+- **Frontend**: React application hosted on EKS
 - **Backend**: Node.js/Express API server running in EKS
 - **Database**: Amazon RDS MySQL instance
 
