@@ -110,62 +110,118 @@ This is a **multi-region, highly available, cloud-native 3-tier application** de
 
 ## Traffic Flow
 
-### Complete Request Journey (Internet to Database)
+## Complete Request Journey (Internet to Database)
 
-**Step 1: User Request**  
-Location: Internet  
-Action: User makes HTTP request to studentteacher.threetierashutoshproject1197.xyz
+### Step 1: User Request
+- **Location**: Internet
+- **Action**: User makes HTTP request to `studentteacher.threetierashutoshproject1197.xyz`
 
-**Step 2: DNS Resolution (Route 53)**  
-Location: Global AWS Service  
-Actions:
-- Receives DNS query
-- Checks health of Primary ALB (Region 1)
-- If healthy: Returns Region 1 ALB DNS
-- If unhealthy: Returns Region 2 ALB DNS (Failover)
+### Step 2: DNS Resolution (Route 53)
+- **Location**: Global AWS Service
+- **Actions**:
+  - Receives DNS query
+  - Checks health of Primary ALB (Region 1)
+  - If healthy: Returns Region 1 ALB DNS
+  - If unhealthy: Returns Region 2 ALB DNS (Failover)
 
-**Step 3: VPC Entry (Internet Gateway)**  
-Location: VPC Boundary  
-Action: Traffic enters VPC from public internet
+### Step 3: VPC Entry (Internet Gateway)
+- **Location**: VPC Boundary
+- **Action**: Traffic enters VPC from public internet
 
-**Step 4: Load Balancer (Public Subnets)**  
-Location: Public Subnets (AZ1 and AZ2)  
-Actions:
-- ALB receives HTTP request on Port 80
-- Path-based routing: / goes to Frontend, /backend goes to Backend
-- Directly targets Pod IPs
+### Step 4: Load Balancer (Public Subnets)
+- **Location**: Public Subnets (AZ1 and AZ2)
+- **Actions**:
+  - ALB receives HTTP request on Port 80
+  - **Path-based routing**:
+    - **Path `/`**: Routes to Frontend Service → Serves React static files
+    - **Path `/backend`**: Routes to Backend Service → Processes API requests
+  - Directly targets Pod IPs (Target Type: IP)
+  - **Note**: Both paths are exposed through ALB because the React app runs in the user's browser and makes API calls directly to `/backend`
 
-**Step 5: Kubernetes Service Layer**  
-Location: Internal Cluster Networking  
-Actions:
-- Frontend Service routes to Frontend Pods
-- Backend Service routes to Backend Pods
+### Step 5: Kubernetes Service Layer
+- **Location**: Internal Cluster Networking
+- **Actions**:
+  - Frontend Service (ClusterIP:80) routes to Frontend Pods
+  - Backend Service (ClusterIP:80) routes to Backend Pods
+  - Services provide load balancing across pods
 
-**Step 6: Application Pods (Private Subnets)**  
-Location: EKS Worker Nodes in Private Subnets  
-Actions:
-- Frontend Pod (React) serves UI on container port 3000
-- Backend Pod (Node.js) handles API requests on port 5000
-- Backend reads DB credentials from Kubernetes Secrets
-- Backend connects to RDS MySQL
+### Step 6: Application Pods (Private Subnets)
+- **Location**: EKS Worker Nodes in Private Subnets
+- **Actions**:
+  
+  **Frontend Pod** (Container Port 3000):
+  - Acts as a **static file server** (nginx/serve)
+  - Serves HTML, CSS, and JavaScript files for React app
+  - **Does NOT execute React code or make API calls**
+  - **Does NOT communicate with Backend Pods**
+  
+  **Backend Pod** (Container Port 5000):
+  - Node.js API server handles requests from user's browser
+  - Reads DB credentials from Kubernetes Secrets
+  - Connects to RDS MySQL database
+  - Processes API logic and returns JSON responses
 
-**Step 7: Database (Private Subnets)**  
-Location: Private Subnets (AZ1 and AZ2)  
-Actions:
-- Primary RDS instance in AZ1 receives query
-- Standby instance in AZ2 (synchronous replication)
-- Returns query results to backend pods
+### Step 7: Database (Private Subnets)
+- **Location**: Private Subnets (AZ1 and AZ2)
+- **Actions**:
+  - Primary RDS instance in AZ1 receives query
+  - Standby instance in AZ2 (synchronous replication for high availability)
+  - Returns query results to Backend Pods
 
-**Step 8: Response Flow**  
-Path: Database to Backend Pod to Frontend Pod to ALB to Internet Gateway to User
+### Step 8: Response Flows
 
-### Outbound Traffic Flow
+**Two Distinct Traffic Patterns:**
+
+#### Pattern A: Initial Page Load (One-time)
+
+**REQUEST:**
+User Browser → Route 53 → IGW → ALB (/) → Frontend Pod
+
+**RESPONSE:**
+Frontend Pod → ALB → IGW → User Browser (Downloads React app files)
+
+#### Pattern B: API Requests/Responses (Ongoing)
+
+**REQUEST:**
+User Browser (React app running) → Route 53 → IGW → ALB (/backend) → Backend Pod → RDS
+
+**RESPONSE:**
+RDS → Backend Pod → ALB → IGW → User Browser
+
+**Key Point**: After the initial page load, **Frontend Pod is no longer involved**. All subsequent API communication happens between the user's browser and Backend Pod through ALB.
+
+---
+
+## Outbound Traffic Flow
 
 Pods in Private Subnets access the internet via:
 
-Pod (Private Subnet) to NAT Gateway (Public Subnet) to Internet Gateway to Internet
+**Flow:** Pod (Private Subnet) → NAT Gateway (Public Subnet) → Internet Gateway → Internet
 
-Use cases: Pulling Docker images from ECR, npm/apt package downloads, External API calls
+**Use cases**:
+- Pulling Docker images from Amazon ECR
+- npm/apt package downloads
+- External API calls
+- Software updates
+
+---
+
+## Architecture Summary
+
+| Component | Role | Communicates With |
+|-----------|------|-------------------|
+| **Frontend Pod** | Static file server (nginx/serve) | Only ALB (serves files on request) |
+| **Backend Pod** | API server (Node.js) | ALB (receives requests) + RDS (queries database) |
+| **User Browser** | Runs React app, makes API calls | ALB (for both static files and API endpoints) |
+| **ALB** | Routes traffic based on path | Frontend Pod (`/`) and Backend Pod (`/backend`) |
+| **Frontend ↔ Backend Pods** | **NO DIRECT COMMUNICATION** | N/A |
+
+---
+
+## Interview Talking Points
+
+> "The architecture uses a **client-side React pattern** where the frontend pod serves static files once, and then all API communication happens directly between the user's browser and the backend through the Application Load Balancer. The frontend and backend pods don't communicate with each other—they're completely decoupled. The ALB exposes both the frontend at path `/` and the backend API at path `/backend` because the React application runs client-side in the user's browser, not server-side in the pod."
+
 
 ### EKS Control Plane Communication
 
